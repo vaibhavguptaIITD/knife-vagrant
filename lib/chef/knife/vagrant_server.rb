@@ -180,7 +180,6 @@ module KnifePlugins
             #{box} 
             config.vm.host_name = "#{config[:hostname]}"
             config.vm.customize [ "modifyvm", :id, "--memory", #{config[:memsize]} ]
-            config.vm.customize [ "modifyvm", :id, "--name", "#{config[:hostname]}" ]
             config.vm.box_url = "#{config[:box_url]}"
             #{build_networks(config[:networks])}
             config.vm.provision :chef_client do |chef|
@@ -188,7 +187,6 @@ module KnifePlugins
               chef.validation_key_path = "#{Chef::Config[:validation_key]}"
               chef.validation_client_name = "#{Chef::Config[:validation_client_name]}"
               chef.node_name = "#{config[:hostname]}"
-              chef.log_level = :#{config[:chef_loglevel].downcase}
               chef.environment = "#{Chef::Config[:environment]}"
               chef.json = #{config[:json_attributes]}
               chef.run_list = [
