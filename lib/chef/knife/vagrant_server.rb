@@ -98,6 +98,12 @@ module KnifePlugins
         :proc => lambda { |o| o.split(/[\s,]+/) },
         :default => ["role[base]"]
 
+      option :vagrant_ssh_timeout,
+        :short => "-t TIMEOUT",
+        :long => "--vagrant-ssh-timeout TIMEOUT",
+        :description => "Tune vagrant SSH timeout; default: 45",
+        :default => "45"
+
       option :hostname,
         :short => '-H HOSTNAME',
         :long => '--hostname HOSTNAME',
@@ -178,6 +184,7 @@ module KnifePlugins
           Vagrant::Config.run do |config|
             #{build_port_forwards(config[:port_forward])}
             #{box} 
+            config.vm.ssh.timeout = "#{config[:vagrant_ssh_timeout]}"
             config.vm.host_name = "#{config[:hostname]}"
             config.vm.customize [ "modifyvm", :id, "--memory", #{config[:memsize]} ]
             config.vm.customize [ "modifyvm", :id, "--name", "#{config[:hostname]}" ]
