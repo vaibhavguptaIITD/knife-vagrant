@@ -1,4 +1,5 @@
 # knife-vagrant
+>>>>>>> timeout
 # knife plugin for spinning up a vagrant instance and testing a runlist.
 
 module KnifePlugins
