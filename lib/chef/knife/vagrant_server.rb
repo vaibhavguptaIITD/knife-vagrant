@@ -202,7 +202,7 @@ module KnifePlugins
             #{build_port_forwards(config[:port_forward])}
             #{box}
             #{shares}
-            config.vm.ssh.timeout = "#{config[:vagrant_ssh_timeout]}"
+            config.ssh.timeout = #{config[:vagrant_ssh_timeout]}
             config.vm.host_name = "#{config[:hostname]}"
             config.vm.customize [ "modifyvm", :id, "--memory", #{config[:memsize]} ]
             config.vm.box_url = "#{config[:box_url]}"
