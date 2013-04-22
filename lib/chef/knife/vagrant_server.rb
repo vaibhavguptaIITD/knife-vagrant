@@ -6,16 +6,8 @@ module KnifePlugins
   class VagrantServer < Chef::Knife
     banner "knife vagrant server [SUB-COMMAND]"
     
-    def run
-    end
-
-    #
     class VagrantServerSsh < VagrantServer
       banner "knife vagrant server ssh [hostname]"
-      deps do
-        require 'vagrant'
-        require 'vagrant/cli'
-      end
 
       option :hostname,
         :short => '-H HOSTNAME',
@@ -40,10 +32,10 @@ module KnifePlugins
         else 
           hostname = config[:hostname] 
         end
-        
-        
-        @vagrant_env = Vagrant::Environment.new(:cwd => "#{config[:vagrant_dir]}/#{hostname}/", :ui_class => Vagrant::UI::Colored)
-        @vagrant_env.cli("ssh")
+       
+        # NOTE: Massive hack for now so we don't have to use vagrant gem
+        Dir.chdir("#{config[:vagrant_dir]}/#{hostname}/")
+        exec("vagrant ssh")
       end
     end
 
@@ -51,25 +43,14 @@ module KnifePlugins
     class VagrantServerList < Chef::Knife
       banner "knife vagrant server list"
 
-      deps do
-        require 'vagrant'
-        require 'vagrant/cli'
-      end
-
       def run
-        @vagrant_env = Vagrant::Environment.new(:ui_class => Vagrant::UI::Colored)
-        @vagrant_env.cli("box","list")
+        exec( "cd #{config[:vagrant_dir]}; vagrant box list")
       end
     end
 
     #
     class VagrantServerCreate < VagrantServer
       banner "knife vagrant server create (options)"
-
-      deps do
-        require 'vagrant'
-        require 'vagrant/cli'
-      end
 
       option :networks,
         :short => '-n NETWORKS',
@@ -147,6 +128,12 @@ module KnifePlugins
         :proc => lambda { |o| o.split(/[\s,]+/) },
         :default => []
 
+      option :berkshelf,
+        :short => '-B',
+        :long => '--berkshelf',
+        :description => 'Enable vagrant-berkshelf for. Requires you to have installed the vvagrant-berkshelf plugin',
+        :default => false
+
       # TODO - hook into chef/runlist
       def build_runlist(runlist)
         runlist.collect { |i| "\"#{i}\"" }.join(",\n")
@@ -158,9 +145,9 @@ module KnifePlugins
 
       def parse_hostonly(network)
         addr, mask = network.split("/")
-        config = "\"#{addr}\""
+        config = "ip: \"#{addr}\""
         if mask
-          config << ", :netmask => \"#{mask}\""
+          config << ", netmask: \"#{mask}\""
         end
         config
       end
@@ -170,9 +157,9 @@ module KnifePlugins
         networks.each do |net|
           case net[0].downcase
           when "bridge"
-            output << "config.vm.network :bridged, :bridge => #{net[1]}\n"
+            output << "config.vm.network :public_network, adapter: #{net[1]}\n"
           when "hostonly"
-            output << "config.vm.network :hostonly, #{parse_hostonly(net[1])}\n"
+            output << "config.vm.network :private_network, #{parse_hostonly(net[1])}\n"
           end
         end
         output
@@ -182,9 +169,14 @@ module KnifePlugins
         shares=""
         config[:share_folders].each do |share|
           name,guest,host = share.chomp.split "::"
-          shares << "config.vm.share_folder '#{name}', '#{guest}', '#{host}' "
+          shares << "config.vm.synced_folder '#{guest}', '#{host}' "
         end 
         shares
+      end
+
+      def berkshelf
+        berks = ""
+        berks = "config.berkshelf.enabled = true" if config[:berkshelf] == true
       end
 
       # TODO:  see if there's a way to pass this whole thing in as an object or hash or something, instead of writing a file to disk.
@@ -197,27 +189,37 @@ module KnifePlugins
         end 
 
         file = <<-EOF
-          Vagrant::Config.run do |config|
-            #{build_port_forwards(config[:port_forward])}
-            #{box}
-            #{shares}
-            config.ssh.timeout = #{config[:vagrant_ssh_timeout]}
-            config.vm.host_name = "#{config[:hostname]}"
-            config.vm.customize [ "modifyvm", :id, "--memory", #{config[:memsize]} ]
-            config.vm.box_url = "#{config[:box_url]}"
-            #{build_networks(config[:networks])}
-            config.vm.provision :chef_client do |chef|
-              chef.chef_server_url = "#{Chef::Config[:chef_server_url]}"
-              chef.validation_key_path = "#{Chef::Config[:validation_key]}"
-              chef.validation_client_name = "#{Chef::Config[:validation_client_name]}"
-              chef.node_name = "#{config[:hostname]}"
-              chef.environment = "#{Chef::Config[:environment]}"
-              chef.json = #{config[:json_attributes]}
-              chef.run_list = [
-                #{build_runlist(config[:vagrant_run_list])}
-              ]
-            end
-          end
+Vagrant.configure("2") do |config|
+  #{build_port_forwards(config[:port_forward])}
+  #{box}
+  #{shares}
+  #{berkshelf}
+  #{build_networks(config[:networks])}
+  #
+  config.ssh.timeout = #{config[:vagrant_ssh_timeout]}
+  config.vm.hostname = "#{config[:hostname]}"
+  config.vm.box_url = "#{config[:box_url]}"
+
+  config.vm.provider :virtualbox do |vb|
+    vb.customize [ "modifyvm", :id, "--memory", #{config[:memsize]} ]
+  end
+  
+  config.vm.provider "vmware_fusion" do |v|
+    # TODO: get the vmware memory setting
+  end
+
+  config.vm.provision :chef_client do |chef|
+    chef.chef_server_url = "#{Chef::Config[:chef_server_url]}"
+    chef.validation_key_path = "#{Chef::Config[:validation_key]}"
+    chef.validation_client_name = "#{Chef::Config[:validation_client_name]}"
+    chef.node_name = "#{config[:hostname]}"
+    chef.environment = "#{Chef::Config[:environment]}"
+    chef.json = #{config[:json_attributes]}
+    chef.run_list = [
+      #{build_runlist(config[:vagrant_run_list])}
+    ]
+  end
+end
         EOF
         file
       end
@@ -244,10 +246,10 @@ module KnifePlugins
         ensure_dir(vagrantdir)
 
         write_vagrantfile("#{vagrantdir}/#{vagrantfile}", build_vagrantfile)
-        @vagrant_env = Vagrant::Environment.new(:cwd => vagrantdir, :ui_class => Vagrant::UI::Colored)
         
+        Dir.chdir(vagrantdir)
         begin
-          @vagrant_env.cli("up")
+          system("vagrant up")
         rescue
           raise # I'll put some error handling here later.
         ensure
@@ -260,8 +262,6 @@ module KnifePlugins
       banner "knife vagrant server delete [hostname] (args)"
 
       deps do
-        require 'vagrant'
-        require 'vagrant/cli'
         require 'chef/node'
         require 'chef/api_client'
       end
@@ -295,9 +295,8 @@ module KnifePlugins
         # confirm delete
         ui.confirm("Destroy vagrant box #{hostname} and delete chef node and client")
         
-        #Dir.chdir("#{config[:vagrant_dir]}/#{config[:hostname]}/")
-        @vagrant_env = Vagrant::Environment.new(:cwd => vagrantdir, :ui_class => Vagrant::UI::Colored)
-        @vagrant_env.cli("box","remove",hostname)
+        Dir.chdir(vagrantdir)
+        system("vagrant box remove #{hostname}")
         delete_object(Chef::Node, hostname)
         delete_object(Chef::ApiClient, hostname)
         Dir.delete( vagrantdir )
